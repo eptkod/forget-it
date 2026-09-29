@@ -3,10 +3,13 @@ import SwiftUI
 @main
 struct ForgetItApp: App {
     @State private var store = PlannerStore()
+    @State private var ai = LocalAIController()
     var body: some Scene {
         WindowGroup("forget it", id: "planner") {
             TimelineView(.everyMinute) { _ in
                 PlannerView(store: store)
+                    .environment(ai)
+                    .task { if !ai.checked { await ai.check() } }
                     .tint(SchoolClass.tint("lavender"))
                     .frame(minWidth: 920, minHeight: 640)
             }
@@ -31,6 +34,7 @@ struct ForgetItApp: App {
         }
         Settings {
             PreferencesView(store: store)
+                .environment(ai)
                 .tint(SchoolClass.tint("lavender"))
         }
     }

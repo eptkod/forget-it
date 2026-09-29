@@ -182,7 +182,8 @@ func expectThrows(_ body: () throws -> Void, file: StaticString = #file, line: U
     fatalError("Expected validation error", file: file, line: line)
 }
 @main struct TestRunner {
-    @MainActor static func main() throws {
+    @MainActor static func main() async throws {
+        try await runAITests()
         let tests = PlannerTests()
         tests.testSpanIsOneSegmentAndDeadlineAtEnd()
         tests.testCrossWeekSpanAndCollisionLanes()

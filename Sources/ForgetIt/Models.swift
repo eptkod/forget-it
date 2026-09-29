@@ -105,6 +105,7 @@ struct StudyTask: Identifiable, Codable, Equatable {
     var attachments: [Attachment] = []
     // Optional for lossless decoding of version 0.1 planners and backups.
     var plan: TaskPlan?
+    var aiSource: AITaskSource?
     var work: TaskPlan {
         get { plan ?? TaskPlan() }
         set { plan = newValue }

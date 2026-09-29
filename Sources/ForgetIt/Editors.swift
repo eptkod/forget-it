@@ -7,6 +7,9 @@ struct TaskEditor: View {
     @Environment(\.dismiss) private var dismiss
     @FocusState private var titleFocused: Bool
     @State private var confirmDelete = false
+    @State private var showAI = false
+    @State private var attachmentError: String?
+    @State private var attachmentLoading = false
     @State private var progressUndo: [([WorkSession], Date?)] = []
     private var existing: Bool { store.data.tasks.contains { $0.id == task.id } }
     private var problem: String? {
@@ -66,7 +69,8 @@ struct TaskEditor: View {
                     if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
                 }
                 Section("Notes") {
-                    TextEditor(text: $task.notes).font(.body).frame(minHeight: 70).accessibilityLabel("Task notes")
+                    AttachmentTextEditor(text: $task.notes, attachments: $task.attachments, onError: { attachmentError = $0 }).frame(minHeight: 70).accessibilityLabel("Task notes")
+                    Button("Ask AI about this task", systemImage: "sparkles") { showAI = true }
                 }
                 Section("Reminders") {
                     Toggle("Use default schedule", isOn: Binding(get: { task.reminder == nil }, set: { task.reminder = $0 ? nil : (store.data.defaultReminder ?? ReminderRule()) }))
@@ -78,14 +82,8 @@ struct TaskEditor: View {
                     Text("Excluded days skip daily reminders. One-off deadline alerts still apply.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Attachments") {
-                    ForEach(task.attachments) { attachment in
-                        HStack {
-                            Button(attachment.name, systemImage: "paperclip") { store.openAttachment(attachment) }.buttonStyle(.link)
-                            Spacer()
-                            Button("Remove", systemImage: "xmark") { task.attachments.removeAll { $0.id == attachment.id } }.labelStyle(.iconOnly).buttonStyle(.borderless)
-                        }
-                    }
-                    Button("Attach File…", systemImage: "paperclip") { store.addAttachments(to: &task) }
+                    AttachmentInput(attachments: $task.attachments, onOpen: store.openAttachment, loading: $attachmentLoading)
+                    if let attachmentError { Text(attachmentError).foregroundStyle(.red) }
                     Text("Copied into your planner and backups. Up to 20 MB each.").font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped)
@@ -100,9 +98,10 @@ struct TaskEditor: View {
                 Button(existing ? "Save Changes" : "Add Task") {
                     task.title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
                     if store.save(task) { dismiss() }
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!valid)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!valid || attachmentLoading)
             }.padding(20)
         }.frame(width: 650, height: 740)
+            .sheet(isPresented: $showAI) { LocalAISheet(store: store, contextTask: task) }
             .onAppear { titleFocused = !existing }
             .onChange(of: task.targetCount()) { _, _ in task.reconcileCompletion() }
             .onChange(of: task.work.kind) { _, kind in
@@ -359,6 +358,7 @@ struct ReminderSetup: View {
 struct PreferencesView: View {
     @Bindable var store: PlannerStore
     @State private var rule = ReminderRule()
+    @State private var showAI = false
     var body: some View {
         Form {
             Section("Default Reminders") {
@@ -382,14 +382,19 @@ struct PreferencesView: View {
                 Text("Your planner and attachments stay on this Mac. Export a backup regularly, especially before starting a new term.").foregroundStyle(.secondary)
                 HStack { Button("Export Backup…", action: store.exportBackup); Button("Restore Backup…", action: store.restoreBackup) }
             }
+            Section("Local AI") {
+                Button("Set Up or Manage Local AI…", systemImage: "sparkles") { showAI = true }
+                Text("Optional task import and clarification, powered by Ollama on your Mac. Models load only when needed.").font(.caption).foregroundStyle(.secondary)
+            }
             Section("About forget it") {
                 HStack(spacing: 12) {
                     BrandMark().frame(width: 48, height: 48)
-                    Text("Version 0.2 · A little less to remember.")
+                    Text("Version 0.3 · A little less to remember.")
                 }
-                Text("The optional local AI assistant is planned for a later build. This version works entirely offline.").font(.caption).foregroundStyle(.secondary)
+                Text("Your planner works without AI or an internet connection.").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped).frame(width: 560, height: 710)
+            .sheet(isPresented: $showAI) { LocalAISheet(store: store) }
             .onAppear { rule = store.data.defaultReminder ?? ReminderRule(); store.refreshReminders() }
     }
 }

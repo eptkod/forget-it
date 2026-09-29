@@ -1,6 +1,6 @@
 # forget it
 
-A calm, native macOS homework planner. Version 0.2 targets **macOS 26 or later on Apple Silicon** and uses SwiftUI, AppKit, and UserNotifications. No third-party packages, network calls, account, AI runtime, or model downloads are required.
+A calm, native macOS homework planner. Version 0.3 targets **macOS 26 or later on Apple Silicon** and uses SwiftUI, AppKit, and UserNotifications. No third-party packages or account are required. Manual planning works offline; optional local AI uses Ollama.
 
 ![forget it app preview](assets/app-preview.png)
 
@@ -66,10 +66,31 @@ Reminder times follow the local calendar/time zone. One-day/three-day presets us
 
 ## Scope and remaining work
 
-This is the first manual/offline version described by the design brief. Optional Vision/Ollama assignment import, model installation UI, and real-device AI benchmarks are not implemented. A task details sheet is used rather than a persistent inspector. Apple Calendar sync and lesson timetables are intentionally outside this version.
+Local AI speed, memory and accuracy have not yet been benchmarked against downloaded models on the owner’s Mac. Model-card ratings are estimates. Apple Calendar sync and lesson timetables are outside this version.
 
 Before public distribution: exercise real notification delivery and opening a task from a banner, verify long-running behaviour and accessibility with the owner's settings, sign with Developer ID, notarize, and test the DMG on another Mac. No GitHub release is published by the build script.
 
 ## Design references
 
 The implementation uses native system navigation and a legible content layer, following Apple's [macOS guidelines](https://developer.apple.com/design/human-interface-guidelines/designing-for-macos/), [Liquid Glass adoption guide](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass), and [materials guidance](https://developer.apple.com/design/human-interface-guidelines/materials). Notifications use Apple's [local notification APIs](https://developer.apple.com/documentation/usernotifications/scheduling-a-notification-locally-from-your-app).
+
+
+## Optional local AI (0.3)
+
+- **Assistant** in the toolbar imports homework/revision from text and up to six screenshots, or explains a selected task. **Ask AI** is also available inside task details.
+- Suggestions are editable and require review before saving. Missing dates/classes and possible duplicates are highlighted. Each import is one undoable planner change; original text and screenshots are retained.
+- Launch checks Ollama availability and lists local models without loading a model. No installation or model download happens automatically.
+- Cancellable onboarding installs the official Ollama Mac archive into `~/Applications/Ollama.app`, verifies it with macOS, and starts its bundled server. No Homebrew, Python, symlink or administrator password is required.
+- Model cards offer **Qwen3.5 4B (~3.4 GB)**, **Qwen3.5 2B (~2.7 GB)** and **Qwen3-VL 2B (~1.9 GB)**. Download sizes and performance vary. Advanced settings support other local model names and a custom loopback server address.
+- Requests run one at a time with `keep_alive: 0`; completion, failure and cancellation also trigger an unload request. The app does not preload models or run background inference. A server started by forget it stops when forget it quits; independently started Ollama servers are left running.
+- Text and screenshots go only to the configured loopback endpoint. Remote endpoints, redirects and detected cloud models are rejected. Downloads contact Ollama’s official service. Clarification is read-only and receives the selected task’s context, not the entire planner.
+- Task notes and AI input accept **⌘V**, image/file drag-and-drop, and the original file picker. Attachments remain part of planner backups.
+- Use **Preferences → Local AI** to revisit setup or change models. Manual task entry remains available without AI.
+
+### AI validation and limits
+
+`bash scripts/test.sh` covers planner regression tests plus extraction validation, local endpoint restrictions, duplicate checks, backup preservation, simulated Ollama streams, interrupted/error responses, cancellation/unloading and a private image clipboard. Clipboard tests require normal macOS clipboard access.
+
+The interface has been inspected in the isolated preview app. No multi-gigabyte model was downloaded during development. Actual model inference, cold-load time, memory use and a fresh Ollama installation still require real-device validation. The installer preserves an existing installation; cancellation leaves any completed installation and Ollama’s resumable partial model downloads in place.
+
+Official references: [Mac installation](https://docs.ollama.com/macos), [chat API](https://docs.ollama.com/api/chat), [model downloads](https://docs.ollama.com/api/pull), [structured output](https://docs.ollama.com/capabilities/structured-outputs).

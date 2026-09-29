@@ -1,3 +1,15 @@
+# Version 0.3 validation — 29 September 2026
+
+- Release compilation and all 18 existing planner regression tests pass.
+- Final 0.3.0 app signature verification and DMG checksum verification passed; dist/forget-it.dmg contains the updated build.
+- Added automated checks for loopback-only endpoints, local model names, strict date parsing, extraction validation, mandatory review, missing source evidence, duplicate detection and original-source backup round trips.
+- Simulated Ollama tests verify model filtering, streamed answers, interrupted/error responses, no inference during launch checks, keep_alive: 0, explicit unloading after success/failure/cancellation and disabled thinking for compatible models.
+- A private macOS clipboard verifies image reading without altering the user's clipboard. Image data providers verify drag-and-drop decoding and image preparation.
+- Inspected runtime setup and all three model cards in the isolated preview app. Verified Cancel returns to the planner and that normal text pasting enables Find Tasks in the assistant composer.
+- Preview modes never install software, download models, perform inference or save planner changes.
+
+Not yet tested with a downloaded model: actual inference quality, OCR/vision accuracy, cold-load time, RAM/battery use, partial-download resume behaviour or a clean Ollama installation. Ollama is already installed on this Mac; no model was silently downloaded for testing. Card ratings are estimates. Installer code uses the official Mac archive and macOS signature/Gatekeeper checks.
+
 # Version 0.2 validation — 29 September 2026
 
 - Release build succeeded with Swift 6.2.3 / macOS 26 SDK.

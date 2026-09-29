@@ -12,6 +12,7 @@ struct PlannerView: View {
     @State private var selectedDay = Date()
     @State private var classDraft: SchoolClass?
     @State private var showSetup = false
+    @State private var showAI = false
     @State private var showCompleted = true
     private var calendar: Calendar { .current }
     private var selectedClass: SchoolClass? { store.data.classes.first { $0.id.uuidString == selection } }
@@ -59,6 +60,7 @@ struct PlannerView: View {
         }
         .sheet(item: $draft) { task in TaskEditor(store: store, task: task, sessionDay: selectedDay) }
         .sheet(item: $classDraft) { schoolClass in ClassEditor(store: store, schoolClass: schoolClass) }
+        .sheet(isPresented: $showAI) { LocalAISheet(store: store) }
         .sheet(isPresented: $showSetup) { ReminderSetup(store: store) }
         .alert("Something needs your attention", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
@@ -142,6 +144,7 @@ struct PlannerView: View {
             Button { store.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
                 .disabled(!store.canUndo).help(store.undoTitle)
         }
+        ToolbarItem { Button("Assistant", systemImage: "sparkles") { showAI = true } }
         ToolbarItem(placement: .primaryAction) {
             Button(action: newTask) { Label("New Task", systemImage: "plus") }.keyboardShortcut("n")
         }
