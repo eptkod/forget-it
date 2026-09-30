@@ -73,9 +73,9 @@ struct Attachment: Codable, Identifiable, Equatable {
 }
 
 enum TaskKind: String, Codable, CaseIterable, Identifiable {
-    case homework, revision
+    case homework, revision, event
     var id: String { rawValue }
-    var title: String { self == .homework ? "Homework" : "Revision" }
+    var title: String { self == .event ? "Event" : self == .homework ? "Homework" : "Revision" }
 }
 
 struct WorkSession: Codable, Equatable, Identifiable {
@@ -106,10 +106,13 @@ struct StudyTask: Identifiable, Codable, Equatable {
     // Optional for lossless decoding of version 0.1 planners and backups.
     var plan: TaskPlan?
     var aiSource: AITaskSource?
+    var repeatRule: TaskRepeat?
+    var seriesID: UUID?
     var work: TaskPlan {
         get { plan ?? TaskPlan() }
         set { plan = newValue }
     }
+    var isEvent: Bool { work.kind == .event }
     var isRevision: Bool { work.kind == .revision }
     var isAllDay: Bool { work.allDay }
     var isComplete: Bool { completedAt != nil }
@@ -117,8 +120,8 @@ struct StudyTask: Identifiable, Codable, Equatable {
         guard isAllDay else { return due }
         return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: due))!.addingTimeInterval(-1)
     }
-    var deadlineText: String { isAllDay ? "\(due.formatted(date: .abbreviated, time: .omitted)) · All day" : due.formatted(date: .abbreviated, time: .shortened) }
-    func isOverdue(at date: Date = Date()) -> Bool { !isComplete && deadline() < date }
+    var deadlineText: String { isAllDay ? "\(due.formatted(date: .abbreviated, time: .omitted)) · All day" : due.clockDateTime }
+    func isOverdue(at date: Date = Date()) -> Bool { !isEvent && !isComplete && deadline() < date }
     var displayStart: Date { min(start ?? due, due) }
     var activeEnd: Date { due }
     func isWorkDay(_ day: Date, calendar: Calendar = .current) -> Bool {
@@ -138,6 +141,7 @@ struct StudyTask: Identifiable, Codable, Equatable {
     func targetCount(calendar: Calendar = .current) -> Int { work.sessionTarget ?? (isRevision ? max(1, scheduledDayCount(calendar: calendar)) : 1) }
     var progressCount: Int { work.sessions.isEmpty && isComplete ? 1 : work.sessions.count }
     var progressText: String {
+        if isEvent { return "Event" }
         let noun = isRevision ? (targetCount() == 1 ? "session" : "sessions") : (targetCount() == 1 ? "part" : "parts")
         return "\(progressCount) of \(targetCount()) \(noun)"
     }
@@ -145,7 +149,7 @@ struct StudyTask: Identifiable, Codable, Equatable {
         work.sessions.contains { calendar.isDate($0.day, inSameDayAs: day) }
     }
     func canRecord(on day: Date, calendar: Calendar = .current) -> Bool {
-        !isComplete && (!isRevision || (isWorkDay(day, calendar: calendar) && !didStudy(on: day, calendar: calendar)))
+        !isEvent && !isComplete && (!isRevision || (isWorkDay(day, calendar: calendar) && !didStudy(on: day, calendar: calendar)))
     }
     mutating func recordProgress(on day: Date, at now: Date = Date(), calendar: Calendar = .current) {
         guard canRecord(on: day, calendar: calendar) else { return }
@@ -161,6 +165,7 @@ struct StudyTask: Identifiable, Codable, Equatable {
         completedAt = nil
     }
     mutating func reconcileCompletion(calendar: Calendar = .current) {
+        if isEvent { start = nil; completedAt = nil; work.sessionTarget = nil; work.sessions = []; work.excludedWeekdays = []; return }
         // A completion from the old app represents one session, never all newly added parts.
         if let oldCompletion = completedAt, work.sessions.isEmpty, targetCount(calendar: calendar) > 1 {
             work.sessions = [WorkSession(day: calendar.startOfDay(for: oldCompletion), completedAt: oldCompletion)]
@@ -174,6 +179,7 @@ struct StudyTask: Identifiable, Codable, Equatable {
         // All-day alerts use the chosen reminder time, never an arbitrary hidden deadline time.
         let reminderDue = isAllDay ? calendar.date(bySettingHour: rule.hour, minute: rule.minute, second: 0, of: due)! : due
         return rule.dates(due: reminderDue, now: now, calendar: calendar).filter { date in
+            if isEvent && date > reminderDue { return false }
             let daily = rule.kind == .dailyWeek || (rule.kind == .custom && rule.repeatDaily)
             if daily && work.excludedWeekdays.contains(calendar.component(.weekday, from: date)) { return false }
             if isRevision && didStudy(on: date, calendar: calendar) { return false }
@@ -187,6 +193,7 @@ struct PlannerData: Codable, Equatable {
     var classes: [SchoolClass] = []
     var tasks: [StudyTask] = []
     var defaultReminder: ReminderRule?
+    var timetable: [TimetableLesson]?
 }
 
 struct CalendarSegment: Identifiable {

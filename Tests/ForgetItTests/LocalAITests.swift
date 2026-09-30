@@ -67,7 +67,7 @@ final class MockOllama: URLProtocol {
         default: return (200, "{}")
         }
     }
-    let ai = LocalAIController(session: session)
+    let ai = LocalAIController(session: session, conversationFile: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json"))
     ai.configuration = AIConfiguration(); ai.configuration.model = "qwen3.5:4b"
     ai.installed = [InstalledAIModel(name: "qwen3.5:4b", size: 123)]; ai.reachable = true
     let response = try await ai.chat(messages: [["role": "user", "content": "Explain this"]])
@@ -96,6 +96,14 @@ final class MockOllama: URLProtocol {
     MockOllama.reply = { _ in (200, "{\"models\":[]}")}
     await ai.check()
     expect(MockOllama.requests.map { $0.url!.lastPathComponent } == ["tags"])
+    MockOllama.requests = []
+    MockOllama.reply = { _ in (200, "") }
+    let deleteClient = OllamaClient(endpoint: endpoint, session: session)
+    try await deleteClient.deleteModel("test:small")
+    expect(MockOllama.requests.last?.httpMethod == "DELETE")
+    expect(MockOllama.requests.last?.url?.lastPathComponent == "delete")
+    MockOllama.reply = { _ in (500, "") }
+    do { try await deleteClient.deleteModel("test:small"); fatalError("Ignored failed deletion") } catch {}
     let pixel = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
     let png = pixel.representation(using: .png, properties: [:])!
     let attachment = try AttachmentReader.image(png)

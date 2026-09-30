@@ -26,6 +26,12 @@ struct OllamaClient {
         if let error = value["error"] as? String { throw AIError.message(error) }
         return value
     }
+    func deleteModel(_ name: String) async throws {
+        var request = try request("api/delete", body: ["model": name], timeout: 60)
+        request.httpMethod = "DELETE"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw AIError.message("Couldn’t delete this model. Check Ollama and try again.") }
+    }
     func models() async throws -> [InstalledAIModel] {
         let value = try await json("api/tags")
         return try JSONDecoder().decode([InstalledAIModel].self, from: JSONSerialization.data(withJSONObject: value["models"] ?? [])).filter(\.isLocal)
@@ -53,6 +59,7 @@ struct OllamaClient {
 
 @MainActor @Observable
 final class LocalAIController {
+    let conversation: AIConversationStore
     var configuration: AIConfiguration
     var installed: [InstalledAIModel] = []
     var runtime: URL?
@@ -68,9 +75,10 @@ final class LocalAIController {
     private let preview: Bool
     private let session: URLSession
     var ready: Bool { reachable && installed.contains { AIConfiguration.canonicalModel($0.name) == AIConfiguration.canonicalModel(configuration.model) } }
-    init(session: URLSession = OllamaClient.localSession) {
+    init(session: URLSession = OllamaClient.localSession, conversationFile: URL? = nil) {
         self.session = session
         preview = Bundle.main.bundleIdentifier == "app.forgetit.preview" || ProcessInfo.processInfo.arguments.contains("--preview")
+        conversation = AIConversationStore(file: preview ? nil : conversationFile ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ForgetIt/ai-chat.json"))
         configuration = (try? JSONDecoder().decode(AIConfiguration.self, from: UserDefaults.standard.data(forKey: "localAI.configuration") ?? Data())) ?? AIConfiguration()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { if self?.server?.isRunning == true { self?.server?.terminate() } }
@@ -85,7 +93,7 @@ final class LocalAIController {
         if preview && ProcessInfo.processInfo.arguments.contains("--ai-preview-models") {
             reachable = true; checked = true; installed = []; return
         }
-        if preview && ProcessInfo.processInfo.arguments.contains("--ai-preview-ready") {
+        if preview && (ProcessInfo.processInfo.arguments.contains("--ai-preview-ready") || ProcessInfo.processInfo.arguments.contains("--ai-preview-chat")) {
             reachable = true; checked = true; installed = [InstalledAIModel(name: "qwen3.5:4b", size: 3_400_000_000)]
             configuration.model = "qwen3.5:4b"; return
         }
@@ -169,6 +177,15 @@ final class LocalAIController {
             guard process.terminationStatus == 0 else { throw AIError.message("macOS could not verify or unpack Ollama. Install the official app from ollama.com, then choose Check Again.") }
         }.value
     }
+    func deleteModel(_ name: String) async throws {
+        guard !preview else { throw AIError.message("Model deletion is disabled in preview.") }
+        try await OllamaClient(endpoint: AIConfiguration.validatedEndpoint(configuration.endpoint), session: session).deleteModel(name)
+        await check()
+        if AIConfiguration.canonicalModel(configuration.model) == AIConfiguration.canonicalModel(name) {
+            configuration.model = installed.first?.name ?? ""; persist()
+        }
+        status = "Model deleted from this Mac."
+    }
     func pull(_ model: String) async throws {
         guard !preview else { throw AIError.message("Model downloads are disabled in the preview app.") }
         guard AIConfiguration.isLocalModelName(model) else { throw AIError.message("Enter a local Ollama model name, such as qwen3.5:4b.") }
@@ -195,7 +212,7 @@ final class LocalAIController {
         guard info["remote_host"] == nil, info["remote_model"] == nil else { throw AIError.message("Choose a local model. Cloud models are not supported.") }
         let capabilities = info["capabilities"] as? [String] ?? []
         if messages.contains(where: { ($0["images"] as? [String])?.isEmpty == false }) && !capabilities.contains("vision") { throw AIError.message("This model cannot read screenshots. Choose one of the recommended vision models or paste the text instead.") }
-        var body: [String: Any] = ["model": model, "messages": messages, "stream": true, "keep_alive": 0, "options": ["temperature": 0.1, "num_ctx": 8192, "num_predict": 4096]]
+        var body: [String: Any] = ["model": model, "messages": messages, "stream": true, "keep_alive": 0, "options": ["temperature": 0.0, "num_ctx": 8192, "num_predict": 4096]]
         if capabilities.contains("thinking") { body["think"] = false }
         if let schema { body["format"] = schema }
         status = "Reading and thinking… The model may take a moment to load."

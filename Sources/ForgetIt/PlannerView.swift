@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct PlannerView: View {
+    @AppStorage("clockStyle") private var clockStyle = "system"
     @Bindable var store: PlannerStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: String? = "calendar"
@@ -12,6 +13,7 @@ struct PlannerView: View {
     @State private var selectedDay = Date()
     @State private var classDraft: SchoolClass?
     @State private var showSetup = false
+    @AppStorage("hideAssistant") private var hideAssistant = false
     @State private var showAI = false
     @State private var showCompleted = true
     private var calendar: Calendar { .current }
@@ -25,10 +27,11 @@ struct PlannerView: View {
         }
     }
     private var title: String {
-        selectedClass?.name ?? ["calendar": "All Calendars", "today": "Today", "upcoming": "Upcoming", "overdue": "Overdue", "completed": "Completed"][selection ?? "calendar"] ?? "All Calendars"
+        selectedClass?.name ?? ["calendar": "All Calendars", "timetable": "Timetable", "today": "Today", "upcoming": "Upcoming", "overdue": "Overdue", "completed": "Completed"][selection ?? "calendar"] ?? "All Calendars"
     }
 
     var body: some View {
+        let _ = clockStyle
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 200, ideal: 225, max: 280)
@@ -36,7 +39,9 @@ struct PlannerView: View {
             VStack(spacing: 0) {
                 heading
                 Divider()
-                if store.data.classes.isEmpty {
+                if selection == "timetable" {
+                    TimetableView(store: store)
+                } else if store.data.classes.isEmpty {
                     ContentUnavailableView {
                         BrandMark().frame(width: 76, height: 76)
                         Text("A little less to remember.")
@@ -60,12 +65,15 @@ struct PlannerView: View {
         }
         .sheet(item: $draft) { task in TaskEditor(store: store, task: task, sessionDay: selectedDay) }
         .sheet(item: $classDraft) { schoolClass in ClassEditor(store: store, schoolClass: schoolClass) }
+        .onChange(of: hideAssistant) { _, hidden in if hidden { showAI = false } }
         .sheet(isPresented: $showAI) { LocalAISheet(store: store) }
         .sheet(isPresented: $showSetup) { ReminderSetup(store: store) }
         .alert("Something needs your attention", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
+        .onOpenURL { url in if url.scheme == "forgetit" { selection = "calendar"; anchor = Date() } }
         .onReceive(NotificationCenter.default.publisher(for: .newPlannerTask)) { _ in newTask() }
+        .onReceive(NotificationCenter.default.publisher(for: .newPlannerEvent)) { _ in newEvent() }
         .onReceive(NotificationCenter.default.publisher(for: .newPlannerClass)) { _ in classDraft = SchoolClass(name: "") }
         .onChange(of: store.selectedTaskID) { _, id in
             if let task = store.data.tasks.first(where: { $0.id == id }) { draft = task; store.selectedTaskID = nil }
@@ -89,6 +97,7 @@ struct PlannerView: View {
             List(selection: $selection) {
                 Section("Your Planner") {
                     Label("All Calendars", systemImage: "calendar").tag("calendar")
+                    Label("Timetable", systemImage: "calendar.day.timeline.left").tag("timetable")
                     Label("Today", systemImage: "sun.max").tag("today")
                     Label("Upcoming", systemImage: "tray").tag("upcoming")
                     HStack { Label("Overdue", systemImage: "clock.badge.exclamationmark"); Spacer(); Text("\(store.data.tasks.filter { $0.isOverdue() }.count)").foregroundStyle(.secondary).monospacedDigit() }.tag("overdue")
@@ -135,18 +144,22 @@ struct PlannerView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
+        if isCalendar { ToolbarItemGroup(placement: .navigation) {
             Button("Today") { anchor = Date() }.keyboardShortcut("t", modifiers: .command)
             Button { move(-1) } label: { Image(systemName: "chevron.left") }.help("Previous \(calendarMode.lowercased())")
             Button { move(1) } label: { Image(systemName: "chevron.right") }.help("Next \(calendarMode.lowercased())")
+        }
         }
         ToolbarItem {
             Button { store.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
                 .disabled(!store.canUndo).help(store.undoTitle)
         }
-        ToolbarItem { Button("Assistant", systemImage: "sparkles") { showAI = true } }
+        if !hideAssistant { ToolbarItem { Button("Assistant", systemImage: "sparkles") { showAI = true } } }
         ToolbarItem(placement: .primaryAction) {
-            Button(action: newTask) { Label("New Task", systemImage: "plus") }.keyboardShortcut("n")
+            Menu {
+                Button("New Task") { newTask() }.keyboardShortcut("n")
+                Button("New Event") { newEvent() }
+            } label: { Label("Add to Calendar", systemImage: "calendar.badge.plus") }
         }
         ToolbarItem {
             Menu {
@@ -170,7 +183,7 @@ struct PlannerView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(anchor.formatted(.dateTime.month(.wide).year())).font(.title2.weight(.medium))
                 Spacer()
-                Text("\(tasks.filter { !$0.isComplete }.count) open tasks").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(tasks.filter { !$0.isComplete && !$0.isEvent }.count) open tasks · \(tasks.filter { $0.isEvent }.count) events").font(.subheadline).foregroundStyle(.secondary)
             }.padding(.top, 22)
             HStack(spacing: 0) {
                 ForEach(0..<7) { offset in
@@ -228,6 +241,7 @@ struct PlannerView: View {
             } else {
                 List(listTasks) { task in
                     HStack(spacing: 14) {
+                        if task.isEvent { Image(systemName: "calendar").font(.title3).foregroundStyle(store.schoolClass(for: task)?.tint ?? .accentColor) } else {
                         Button {
                             if task.isComplete { store.reopen(task) } else { store.recordProgress(task) }
                         } label: {
@@ -236,16 +250,17 @@ struct PlannerView: View {
                         }.buttonStyle(.plain)
                             .disabled(!task.isComplete && !task.canRecord(on: Date()))
                             .help(task.isComplete ? "Reopen task" : task.isRevision ? "Complete today’s revision session" : task.targetCount() > 1 ? "Complete the next part" : "Complete homework")
+                        }
                         Button { selectedDay = Date(); draft = task } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(task.title).font(.headline).strikethrough(task.isComplete)
-                                    Text("\(store.schoolClass(for: task)?.name ?? "Class") · \(task.isRevision ? "Revision" : "Homework") · \(task.progressText)").font(.caption).foregroundStyle(.secondary)
+                                    Text("\(store.schoolClass(for: task)?.name ?? "Class") · \(task.isEvent ? "Event" : task.work.kind.title + " · " + task.progressText)").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 5) {
                                     Text(task.deadlineText)
-                                    Text(task.isComplete ? "Completed" : task.isOverdue() ? "Overdue" : "Deadline").font(.caption).foregroundStyle(task.isOverdue() ? .red : .secondary)
+                                    Text(task.isEvent ? "Event" : task.isComplete ? "Completed" : task.isOverdue() ? "Overdue" : "Deadline").font(.caption).foregroundStyle(task.isOverdue() ? .red : .secondary)
                                 }
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain)
@@ -271,12 +286,17 @@ struct PlannerView: View {
         selectedDay = Date()
         draft = StudyTask(classID: id)
     }
+    private func newEvent() {
+        newTask()
+        draft?.work.kind = .event
+    }
     private func move(_ offset: Int) {
         anchor = calendar.date(byAdding: calendarMode == "Month" ? .month : .weekOfYear, value: offset, to: anchor)!
     }
 }
 
 struct CalendarWeek: View {
+    @AppStorage("clockStyle") private var clockStyle = "system"
     var store: PlannerStore
     var tasks: [StudyTask]
     var week: Date
@@ -287,6 +307,7 @@ struct CalendarWeek: View {
     private var segments: [CalendarSegment] { CalendarLayout.segments(tasks: tasks, weekStart: week) }
     private var height: CGFloat { max(minimumHeight, CGFloat((segments.map(\.lane).max() ?? -1) + 1) * 28 + 47) }
     var body: some View {
+        let _ = clockStyle
         GeometryReader { geometry in
             let width = geometry.size.width / 7
             ZStack(alignment: .topLeading) {
@@ -319,7 +340,7 @@ struct CalendarWeek: View {
                         if task.targetCount() > 1 && segment.endColumn > segment.startColumn {
                             Text("\(task.progressCount)/\(task.targetCount())").font(.system(size: 9, weight: .semibold)).monospacedDigit()
                         }
-                        if segment.hasDeadline { Image(systemName: "flag.fill").font(.system(size: 9)).foregroundStyle(task.isOverdue() ? Color.red : Color.primary) }
+                        if segment.hasDeadline { Image(systemName: task.isEvent ? "calendar" : "flag.fill").font(.system(size: 9)).foregroundStyle(task.isOverdue() ? Color.red : Color.primary) }
                     }.padding(.horizontal, 7).frame(height: 23)
                         .foregroundStyle(.primary)
                         .background(tint.opacity(segment.isDone ? 0.09 : contrast == .increased ? 0.40 : 0.23), in: RoundedRectangle(cornerRadius: 5))
@@ -331,8 +352,8 @@ struct CalendarWeek: View {
                                     let day = Calendar.current.date(byAdding: .day, value: column, to: week)!
                                     Button { onOpen(task, day) } label: { Color.clear.contentShape(Rectangle()) }
                                         .buttonStyle(.plain)
-                                        .help("\(task.title) · \(day.formatted(date: .abbreviated, time: .omitted)) · \(task.progressText) · Due \(task.deadlineText)")
-                                        .accessibilityLabel("Open \(task.title), \(day.formatted(date: .abbreviated, time: .omitted)), \(segment.isDone ? "session completed" : "not completed"), \(task.progressText)")
+                                        .help("\(task.title) · \(day.formatted(date: .abbreviated, time: .omitted)) · \(task.progressText) · \(task.isEvent ? "When" : "Due") \(task.deadlineText)")
+                                        .accessibilityLabel(task.isEvent ? "Open event \(task.title), \(task.deadlineText)" : "Open \(task.title), \(day.formatted(date: .abbreviated, time: .omitted)), \(segment.isDone ? "session completed" : "not completed"), \(task.progressText)")
                                 }
                             }
                         }

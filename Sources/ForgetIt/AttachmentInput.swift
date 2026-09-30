@@ -84,7 +84,7 @@ struct AttachmentInput: View {
             }
             HStack {
                 Image(systemName: "photo.badge.plus")
-                Text(loading ? "Reading attachment…" : "Drop screenshots here, or paste from your clipboard.").font(.caption)
+                Text(loading ? "Reading attachment…" : "Drop files here, or paste from your clipboard.").font(.caption)
                 Spacer()
                 Button("Paste") { do { let items = try AttachmentReader.pasteboard(.general); if items.isEmpty { error = "Copy an image or file first." }; try append(items) } catch { self.error = error.localizedDescription } }
                 Button("Choose…") {

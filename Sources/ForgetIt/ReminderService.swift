@@ -48,7 +48,7 @@ final class ReminderService: NSObject, UNUserNotificationCenterDelegate {
                 guard token == revision else { return }
                 let content = UNMutableNotificationContent()
                 content.title = "\(data.classes.first { $0.id == task.classID }?.name ?? "Homework") · \(task.title)"
-                content.body = "Due \(task.deadlineText)"
+                content.body = "\(task.isEvent ? "Event" : "Due") \(task.deadlineText)"
                 content.sound = .default
                 content.userInfo = ["taskID": task.id.uuidString]
                 let trigger = UNCalendarNotificationTrigger(dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date), repeats: false)

@@ -1,6 +1,6 @@
 # forget it
 
-A calm, native macOS homework planner. Version 0.3 targets **macOS 26 or later on Apple Silicon** and uses SwiftUI, AppKit, and UserNotifications. No third-party packages or account are required. Manual planning works offline; optional local AI uses Ollama.
+A calm, native macOS homework planner. Version 0.3.1 targets **macOS 26 or later on Apple Silicon** and uses SwiftUI, AppKit, and UserNotifications. No third-party packages or account are required. Manual planning works offline; optional local AI uses Ollama.
 
 ![forget it app preview](assets/app-preview.png)
 
@@ -66,7 +66,7 @@ Reminder times follow the local calendar/time zone. One-day/three-day presets us
 
 ## Scope and remaining work
 
-Local AI speed, memory and accuracy have not yet been benchmarked against downloaded models on the owner’s Mac. Model-card ratings are estimates. Apple Calendar sync and lesson timetables are outside this version.
+Local AI speed, memory and accuracy have not yet been benchmarked against downloaded models on the owner’s Mac. Model-card ratings are estimates. Apple Calendar live sync is outside this version. School timetable imports are local snapshots, not subscriptions. Desktop widget source is included, but its signed integration and clean-install validation remain pending; see [Widgets/README.md](Widgets/README.md).
 
 Before public distribution: exercise real notification delivery and opening a task from a banner, verify long-running behaviour and accessibility with the owner's settings, sign with Developer ID, notarize, and test the DMG on another Mac. No GitHub release is published by the build script.
 
@@ -77,7 +77,7 @@ The implementation uses native system navigation and a legible content layer, fo
 
 ## Optional local AI (0.3)
 
-- **Assistant** in the toolbar imports homework/revision from text and up to six screenshots, or explains a selected task. **Ask AI** is also available inside task details.
+- **Assistant** in the toolbar imports tasks/events from text and attachments, or explains a selected task. Images, PDFs (including scanned pages), Word, RTF, TXT, Markdown and CSV are supported with explicit size/context limits. **Ask AI** is also available inside task details.
 - Suggestions are editable and require review before saving. Missing dates/classes and possible duplicates are highlighted. Each import is one undoable planner change; original text and screenshots are retained.
 - Launch checks Ollama availability and lists local models without loading a model. No installation or model download happens automatically.
 - Cancellable onboarding installs the official Ollama Mac archive into `~/Applications/Ollama.app`, verifies it with macOS, and starts its bundled server. No Homebrew, Python, symlink or administrator password is required.
@@ -94,3 +94,39 @@ The implementation uses native system navigation and a legible content layer, fo
 The interface has been inspected in the isolated preview app. No multi-gigabyte model was downloaded during development. Actual model inference, cold-load time, memory use and a fresh Ollama installation still require real-device validation. The installer preserves an existing installation; cancellation leaves any completed installation and Ollama’s resumable partial model downloads in place.
 
 Official references: [Mac installation](https://docs.ollama.com/macos), [chat API](https://docs.ollama.com/api/chat), [model downloads](https://docs.ollama.com/api/pull), [structured output](https://docs.ollama.com/capabilities/structured-outputs).
+
+
+## What’s new in 0.3.1
+
+- A dedicated, continuous assistant chat, with a message box that stays available during review.
+- Follow-up question cards with suggested answers and free-text responses. Replies retain the current assignment’s context.
+- Conversations are memory-only and clear when the assistant closes. Reopening starts fresh. The previous version’s saved chat file is removed on upgrade; there is no chat archive. Tasks explicitly added to the planner retain their source attachments.
+- AI review uses the same explicit calendar popover as the task editor for deadlines and work start dates. Time selection remains separate.
+- **New Event** adds presentations, appointments and other dated items with an optional time, notes, attachments and reminders. Events appear in the calendar and Today/Upcoming, retain their history, and have no completion checkbox or overdue status. The AI can suggest events too.
+
+
+### v0.3.1 AI fixes (build 6)
+
+- Date and time parsing are independent: an unexpected time format no longer replaces a valid date with today. Common forms such as `15:00:00`, `3pm` and `October 3rd, 2026` are normalized.
+- A single fully specified date/time in the latest instruction overrides a stale one-item AI draft. Multiple-date requests stay with structured extraction and review.
+- Missing dates show **Choose a date…** and cannot be approved until supplied. Review summaries come from the actual draft fields and never claim an item was created before saving.
+- The latest user correction takes precedence over earlier suggestions.
+- Added [Qwen3.5 9B](https://ollama.com/library/qwen3.5:9b), approximately 6.6 GB to download. It uses more memory and runs more slowly than the smaller choices; performance ratings remain estimates.
+- Closing the assistant clears messages, screenshots, unsent input and review drafts. Cancelled responses cannot repopulate a closed chat.
+
+
+## v0.3.1 build 7 additions
+
+- One calendar-style **Add to Calendar** menu for both tasks and events; ⌘N still creates a task.
+- **Preferences → Optional Features → Show study assistant** hides assistant controls and AI settings when switched off. Hidden assistants do not perform the launch model check.
+- **Assistant → Models → Already on this Mac → Delete…** removes a downloaded model after confirmation. Ollama models are shared with other local apps; deleting one affects those apps too.
+- Explicit relative dates such as today, tomorrow, day after tomorrow, weekdays and “in N days/weeks” are resolved using the local calendar for single-item requests. The exact “set a task tomorrow reminding me to…” form, clearly quoted titles with explicit dates, and simple single-item date corrections bypass model interpretation. New date-only text requests become all-day tasks instead of receiving an invented time. Complex requests still need review.
+- **Timetable → Import Timetable…** previews a local `.ics` export before replacing the imported lessons. Timetable opens on today in Day view, with Day / Week / Month switching. Day and Week use lavender time blocks, a separate all-day row and a current-time line; Month shows a compact overview. Click a lesson for its full time, location and notes. Today returns to the current date, and importing never jumps back to the first historical lesson. Import/clear can be undone. Supported rules include daily/weekly/monthly/yearly frequency, intervals, counts/end dates, non-ordinal weekdays, month/day filters, exclusions, additional dates and individual reschedules/cancellations. Unsupported rules are reported, not silently treated as ordinary lessons. Open-ended imports have a two-year horizon shown in the preview; re-import to refresh. Your school's actual file has not yet been tested.
+- **New Task/Event → Repeat** creates daily, weekday, weekly or monthly entries through the chosen end date (maximum 366). Each occurrence can be completed or edited separately. Repeats work without a timetable import; undoing creation removes the new series.
+- Attachments can still be chosen, pasted or dropped. The assistant accepts up to six recent attachments and six images/scanned pages, rejects oversized content instead of silently truncating documents, and sends content only to the local model. Ordinary task attachments can use other file formats and open in their default Mac app.
+
+The regular DMG remains a development build without a desktop widget. Native small/medium WidgetKit sources and a signing build script are in `Widgets/`; an Apple signing identity and signed integration checks are required before distributing that feature. System-managed tinted/clear rendering is used for the Liquid Glass appearance.
+
+## Final v0.3.1 build
+
+Choose **Preferences → Appearance → Clock format** for System default, 12-hour (AM/PM), or 24-hour time. This changes display and input controls without moving any deadlines or lessons. See [new features since v0.3.0](RELEASE_NOTES_v0.3.1.md) for release notes.

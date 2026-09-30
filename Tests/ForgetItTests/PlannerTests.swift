@@ -183,6 +183,8 @@ func expectThrows(_ body: () throws -> Void, file: StaticString = #file, line: U
 }
 @main struct TestRunner {
     @MainActor static func main() async throws {
+        try runSchedulingTests()
+        try runConversationTests()
         try await runAITests()
         let tests = PlannerTests()
         tests.testSpanIsOneSegmentAndDeadlineAtEnd()

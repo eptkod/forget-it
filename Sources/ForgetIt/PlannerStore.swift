@@ -33,6 +33,7 @@ final class PlannerStore {
         }
         notifications.onOpen = { [weak self] id in self?.selectedTaskID = id }
         refreshReminders()
+        PlannerWidgetSnapshot.publish(data)
     }
 
     static func decode(_ bytes: Data) throws -> PlannerData {
@@ -51,6 +52,10 @@ final class PlannerStore {
                 && Set(work.sessions.map(\.id)).count == work.sessions.count
                 && (!task.isRevision || Set(work.sessions.map { Calendar.current.startOfDay(for: $0.day) }).count == work.sessions.count)
         }) else { throw CocoaError(.fileReadCorruptFile) }
+        if let lessons = decoded.timetable {
+            guard lessons.count <= 20_000, Set(lessons.map(\.id)).count == lessons.count,
+                  lessons.allSatisfy({ !$0.title.isEmpty && $0.end >= $0.start }) else { throw CocoaError(.fileReadCorruptFile) }
+        }
         let rules = decoded.tasks.compactMap(\.reminder) + [decoded.defaultReminder].compactMap { $0 }
         guard rules.allSatisfy({ (0...23).contains($0.hour) && (0...59).contains($0.minute) && (0...60).contains($0.leadDays) }) else { throw CocoaError(.fileReadCorruptFile) }
         return decoded
@@ -77,6 +82,7 @@ final class PlannerStore {
                 lastAction = action.prefix(1).uppercased() + action.dropFirst()
             }
             data = next
+            if !isPreview { PlannerWidgetSnapshot.publish(next) }
             refreshReminders()
             return true
         } catch { self.error = "Couldn’t save your changes: \(error.localizedDescription)"; return false }
@@ -96,6 +102,7 @@ final class PlannerStore {
         var task = task
         task.reconcileCompletion()
         if let i = next.tasks.firstIndex(where: { $0.id == task.id }) { next.tasks[i] = task }
+        else if let rule = task.repeatRule { next.tasks.append(contentsOf: rule.occurrences(of: task)) }
         else { next.tasks.append(task) }
         return commit(next, action: action)
     }
@@ -200,6 +207,19 @@ final class PlannerStore {
         tasks[0].recordProgress(on: day(-1))
         tasks[1].plan = TaskPlan(sessionTarget: 3)
         tasks[1].recordProgress(on: day(0))
-        return PlannerData(classes: classes, tasks: tasks, defaultReminder: ReminderRule())
+        var lessons: [TimetableLesson] = []
+        let monday = TimetableCalendar.days(containing: today, mode: .week).first!
+        let subjects = ["French IGCSE", "Science IGCSE", "Media", "Computer Science", "English Language", "Mathematics"]
+        for weekday in 0..<5 {
+            let date = cal.date(byAdding: .day, value: weekday, to: monday)!
+            let tutor = cal.date(bySettingHour: 7, minute: 55, second: 0, of: date)!
+            lessons.append(TimetableLesson(id: "tutor-\(weekday)", title: "Tutor Period", start: tutor, end: tutor.addingTimeInterval(600), allDay: false, location: "Room 12", notes: "Morning registration"))
+            for (index, minutes) in [485, 545, 625, 685, 795, 855].enumerated() {
+                let start = cal.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: date)!
+                lessons.append(TimetableLesson(id: "lesson-\(weekday)-\(index)", title: "P\(index + 1): \(subjects[(index + weekday) % subjects.count])", start: start, end: start.addingTimeInterval(3600), allDay: false, location: "Room \(12 + index)", notes: "Bring your exercise book."))
+            }
+        }
+        lessons.append(TimetableLesson(id: "assessment", title: "Media assessment", start: today, end: cal.date(byAdding: .day, value: 1, to: today)!, allDay: true, location: "", notes: "Assessment day"))
+        return PlannerData(classes: classes, tasks: tasks, defaultReminder: ReminderRule(), timetable: lessons)
     }
 }

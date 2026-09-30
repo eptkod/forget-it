@@ -7,12 +7,15 @@ struct TaskEditor: View {
     @Environment(\.dismiss) private var dismiss
     @FocusState private var titleFocused: Bool
     @State private var confirmDelete = false
+    @AppStorage("hideAssistant") private var hideAssistant = false
     @State private var showAI = false
     @State private var attachmentError: String?
     @State private var attachmentLoading = false
     @State private var progressUndo: [([WorkSession], Date?)] = []
     private var existing: Bool { store.data.tasks.contains { $0.id == task.id } }
     private var problem: String? {
+        if let rule = task.repeatRule, rule.dates(from: task.due).isEmpty { return "Choose a repeat end on or after the first date." }
+        if task.isEvent { return nil }
         if (task.start ?? task.due) > task.deadline() { return "Choose a work start on or before the deadline." }
         if task.work.excludedWeekdays.count == 7 { return "Keep at least one day available for work." }
         if task.scheduledDayCount() == 0 { return "There are no available work days in this span. Change the dates or included days." }
@@ -27,33 +30,34 @@ struct TaskEditor: View {
             HStack(spacing: 14) {
                 BrandMark().frame(width: 40, height: 40)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(existing ? "Task details" : "One less thing to remember.").font(.title2.weight(.semibold))
-                    Text(existing ? "Dates, a plan, and a little progress." : "Set a deadline. Make a little space to work.").foregroundStyle(.secondary)
+                    Text(task.isEvent ? (existing ? "Event details" : "Something to look forward to.") : existing ? "Task details" : "One less thing to remember.").font(.title2.weight(.semibold))
+                    Text(task.isEvent ? "Keep presentations and important dates in your calendar." : existing ? "Dates, a plan, and a little progress." : "Set a deadline. Make a little space to work.").foregroundStyle(.secondary)
                 }
                 Spacer()
             }.padding(24)
             Divider()
             Form {
-                Section("Task") {
-                    TextField("Title", text: $task.title, prompt: Text("What do you need to do?")).focused($titleFocused)
+                Section(task.isEvent ? "Event" : "Task") {
+                    TextField("Title", text: $task.title, prompt: Text(task.isEvent ? "e.g. History presentation" : "What do you need to do?")).focused($titleFocused)
                     Picker("Class", selection: $task.classID) {
                         ForEach(store.data.classes) { schoolClass in Text(schoolClass.name).tag(schoolClass.id) }
                     }
                     Picker("Type", selection: $task.work.kind) {
                         ForEach(TaskKind.allCases) { Text($0.title).tag($0) }
                     }.pickerStyle(.segmented).disabled(!task.work.sessions.isEmpty || task.isComplete)
-                    Text(task.isRevision ? "Tick off each study day. Future revision stays on your calendar." : "Finish once, or work through several parts. Finished homework leaves the calendar.").font(.caption).foregroundStyle(.secondary)
+                    Text(task.isEvent ? "Presentations, appointments and other events stay on your calendar without a completion checkbox." : task.isRevision ? "Tick off each study day. Future revision stays on your calendar." : "Finish once, or work through several parts. Finished homework leaves the calendar.").font(.caption).foregroundStyle(.secondary)
                 }
-                if existing || !task.work.sessions.isEmpty { progressSection }
-                Section("Deadline") {
-                    DayPickerField("Due date", date: $task.due)
+                if !task.isEvent && (existing || !task.work.sessions.isEmpty) { progressSection }
+                Section(task.isEvent ? "When" : "Deadline") {
+                    DayPickerField(task.isEvent ? "Event date" : "Due date", date: $task.due)
                     Toggle("All day", isOn: $task.work.allDay)
                     if !task.isAllDay {
-                        DatePicker("Due time", selection: $task.due, displayedComponents: .hourAndMinute)
+                        ClockTimePicker(task.isEvent ? "Time" : "Due time", selection: $task.due)
                     } else {
-                        Text("Due by the end of this day. Reminder alerts use the schedule’s chosen time.").font(.caption).foregroundStyle(.secondary)
+                        Text(task.isEvent ? "Appears as an all-day event. Alerts use the schedule’s chosen time." : "Due by the end of this day. Reminder alerts use the schedule’s chosen time.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if !task.isEvent {
                 Section("Work Plan") {
                     Toggle("Plan a work span", isOn: Binding(get: { task.start != nil }, set: { task.start = $0 ? min(Calendar.current.startOfDay(for: Date()), task.due) : nil }))
                     if task.start != nil {
@@ -68,9 +72,25 @@ struct TaskEditor: View {
                     }
                     if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
                 }
+                }
+                if !existing {
+                    Section("Repeat") {
+                        Toggle("Repeat on a schedule", isOn: Binding(get: { task.repeatRule != nil }, set: { task.repeatRule = $0 ? TaskRepeat(until: Calendar.current.date(byAdding: .month, value: 3, to: task.due)!) : nil }))
+                        if task.repeatRule != nil {
+                            Picker("Frequency", selection: Binding(get: { task.repeatRule!.frequency }, set: { task.repeatRule?.frequency = $0 })) {
+                                ForEach(["Daily", "Weekdays", "Weekly", "Monthly"], id: \.self) { Text($0).tag($0) }
+                            }
+                            DayPickerField("Repeat until", date: Binding(get: { task.repeatRule!.until }, set: { task.repeatRule?.until = max($0, task.due) }))
+                            if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
+                            Text("Creates \(task.repeatRule!.dates(from: task.due).count) independent entries, up to 366. Complete or edit each one separately. Undo removes the whole new series.").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } else if task.seriesID != nil {
+                    Section { Text("Part of a repeating schedule. Changes apply to this occurrence only.").font(.caption).foregroundStyle(.secondary) }
+                }
                 Section("Notes") {
                     AttachmentTextEditor(text: $task.notes, attachments: $task.attachments, onError: { attachmentError = $0 }).frame(minHeight: 70).accessibilityLabel("Task notes")
-                    Button("Ask AI about this task", systemImage: "sparkles") { showAI = true }
+                    if !hideAssistant { Button(task.isEvent ? "Ask AI about this event" : "Ask AI about this task", systemImage: "sparkles") { showAI = true } }
                 }
                 Section("Reminders") {
                     Toggle("Use default schedule", isOn: Binding(get: { task.reminder == nil }, set: { task.reminder = $0 ? nil : (store.data.defaultReminder ?? ReminderRule()) }))
@@ -79,7 +99,7 @@ struct TaskEditor: View {
                     } else {
                         Text(store.data.defaultReminder?.kind.title ?? "Choose your default in Preferences").foregroundStyle(.secondary)
                     }
-                    Text("Excluded days skip daily reminders. One-off deadline alerts still apply.").font(.caption).foregroundStyle(.secondary)
+                    Text(task.isEvent ? "Reminders use the event’s date and time." : "Excluded days skip daily reminders. One-off deadline alerts still apply.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Attachments") {
                     AttachmentInput(attachments: $task.attachments, onOpen: store.openAttachment, loading: $attachmentLoading)
@@ -89,26 +109,28 @@ struct TaskEditor: View {
             }.formStyle(.grouped)
             Divider()
             HStack {
-                if existing { Button("Delete Task", role: .destructive) { confirmDelete = true } }
+                if existing { Button(task.isEvent ? "Delete Event" : "Delete Task", role: .destructive) { confirmDelete = true } }
                 if !progressUndo.isEmpty {
                     Button("Undo Progress", systemImage: "arrow.uturn.backward") { let previous = progressUndo.removeLast(); task.work.sessions = previous.0; task.completedAt = previous.1 }
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(existing ? "Save Changes" : "Add Task") {
+                Button(existing ? "Save Changes" : task.isEvent ? "Add Event" : "Add Task") {
                     task.title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
                     if store.save(task) { dismiss() }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!valid || attachmentLoading)
             }.padding(20)
         }.frame(width: 650, height: 740)
+            .onChange(of: hideAssistant) { _, hidden in if hidden { showAI = false } }
             .sheet(isPresented: $showAI) { LocalAISheet(store: store, contextTask: task) }
             .onAppear { titleFocused = !existing }
             .onChange(of: task.targetCount()) { _, _ in task.reconcileCompletion() }
             .onChange(of: task.work.kind) { _, kind in
+                if kind == .event { task.reconcileCompletion() }
                 if kind == .revision && task.start == nil { task.start = min(Calendar.current.startOfDay(for: Date()), task.due) }
             }
             .confirmationDialog("Delete this task and cancel its reminders?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("Delete Task", role: .destructive) { store.delete(task); dismiss() }
+                Button(task.isEvent ? "Delete Event" : "Delete Task", role: .destructive) { store.delete(task); dismiss() }
             }
     }
 
@@ -146,17 +168,18 @@ struct TaskEditor: View {
 /// The whole date is a button. Only this explicit action opens the anchored calendar.
 struct DayPickerField: View {
     var title: String
+    var placeholder: String?
     @Binding var date: Date
     @State private var presented = false
-    init(_ title: String, date: Binding<Date>) { self.title = title; self._date = date }
+    init(_ title: String, date: Binding<Date>, placeholder: String? = nil) { self.title = title; self._date = date; self.placeholder = placeholder }
     var body: some View {
         LabeledContent(title) {
             Button { presented.toggle() } label: {
                 HStack(spacing: 8) {
-                    Text(date.formatted(date: .abbreviated, time: .omitted)).monospacedDigit()
+                    Text(placeholder ?? date.formatted(date: .abbreviated, time: .omitted)).monospacedDigit()
                     Image(systemName: "calendar").foregroundStyle(.secondary)
                 }
-            }.help("Choose \(title.lowercased())").accessibilityLabel("\(title): \(date.formatted(date: .complete, time: .omitted)). Open calendar")
+            }.help("Choose \(title.lowercased())").accessibilityLabel("\(title): \(placeholder ?? date.formatted(date: .complete, time: .omitted)). Open calendar")
                 .popover(isPresented: $presented, arrowEdge: .bottom) {
                     DateCalendarPopover(title: title, selected: date) { selected in
                         let calendar = Calendar.current
@@ -293,12 +316,12 @@ struct ReminderRuleEditor: View {
             ForEach(ReminderKind.allCases) { kind in Text(kind.title).tag(kind) }
         }
         if rule.kind != .off && rule.kind != .dailyWeek && rule.kind != .custom {
-            DatePicker("All-day reminder time", selection: Binding(get: {
+            ClockTimePicker("All-day reminder time", selection: Binding(get: {
                 Calendar.current.date(bySettingHour: rule.hour, minute: rule.minute, second: 0, of: Date())!
             }, set: { date in
                 rule.hour = Calendar.current.component(.hour, from: date)
                 rule.minute = Calendar.current.component(.minute, from: date)
-            }), displayedComponents: .hourAndMinute)
+            }))
             Text("Used for all-day tasks. Timed tasks use their due time.").font(.caption).foregroundStyle(.secondary)
         }
         if rule.kind == .dailyWeek || rule.kind == .custom {
@@ -306,12 +329,12 @@ struct ReminderRuleEditor: View {
                 Stepper("Start \(rule.leadDays) days before", value: $rule.leadDays, in: 0...60)
                 Toggle("Repeat once a day", isOn: $rule.repeatDaily)
             }
-            DatePicker("Reminder time", selection: Binding(get: {
+            ClockTimePicker("Reminder time", selection: Binding(get: {
                 Calendar.current.date(bySettingHour: rule.hour, minute: rule.minute, second: 0, of: Date())!
             }, set: { date in
                 rule.hour = Calendar.current.component(.hour, from: date)
                 rule.minute = Calendar.current.component(.minute, from: date)
-            }), displayedComponents: .hourAndMinute)
+            }))
             if rule.kind == .dailyWeek || rule.repeatDaily {
                 Toggle("Continue for 7 days after the deadline", isOn: $rule.continueAfterDeadline)
                 Text(rule.continueAfterDeadline ? "Stops when completed, or seven days after the deadline." : "Stops at the deadline, or as soon as you complete the task.").font(.caption).foregroundStyle(.secondary)
@@ -356,8 +379,10 @@ struct ReminderSetup: View {
 }
 
 struct PreferencesView: View {
+    @AppStorage("clockStyle") private var clockStyle = "system"
     @Bindable var store: PlannerStore
     @State private var rule = ReminderRule()
+    @AppStorage("hideAssistant") private var hideAssistant = false
     @State private var showAI = false
     var body: some View {
         Form {
@@ -378,22 +403,33 @@ struct PreferencesView: View {
                 }
                 Text("macOS controls banners and Focus. Up to 60 upcoming alerts are queued; opening the app refreshes the queue. Daily schedules stop after completion.").font(.caption).foregroundStyle(.secondary)
             }
+            Section("Appearance") {
+                Picker("Clock format", selection: $clockStyle) {
+                    Text("System default").tag("system")
+                    Text("12-hour (1:00 PM)").tag("12")
+                    Text("24-hour (13:00)").tag("24")
+                }
+                Text("Used for calendars, tasks, events and reminder times.").font(.caption).foregroundStyle(.secondary)
+            }
             Section("Your Data") {
                 Text("Your planner and attachments stay on this Mac. Export a backup regularly, especially before starting a new term.").foregroundStyle(.secondary)
                 HStack { Button("Export Backup…", action: store.exportBackup); Button("Restore Backup…", action: store.restoreBackup) }
             }
-            Section("Local AI") {
+            Section("Optional Features") { Toggle("Show study assistant", isOn: Binding(get: { !hideAssistant }, set: { hideAssistant = !$0 })) }
+            if !hideAssistant { Section("Local AI") {
                 Button("Set Up or Manage Local AI…", systemImage: "sparkles") { showAI = true }
                 Text("Optional task import and clarification, powered by Ollama on your Mac. Models load only when needed.").font(.caption).foregroundStyle(.secondary)
+            }
             }
             Section("About forget it") {
                 HStack(spacing: 12) {
                     BrandMark().frame(width: 48, height: 48)
-                    Text("Version 0.3 · A little less to remember.")
+                    Text("Version 0.3.1 · A little less to remember.")
                 }
-                Text("Your planner works without AI or an internet connection.").font(.caption).foregroundStyle(.secondary)
+                Text("Your planner works offline.").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped).frame(width: 560, height: 710)
+            .onChange(of: hideAssistant) { _, hidden in if hidden { showAI = false } }
             .sheet(isPresented: $showAI) { LocalAISheet(store: store) }
             .onAppear { rule = store.data.defaultReminder ?? ReminderRule(); store.refreshReminders() }
     }
