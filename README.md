@@ -130,3 +130,7 @@ The regular DMG remains a development build without a desktop widget. Native sma
 ## Final v0.3.1 build
 
 Choose **Preferences → Appearance → Clock format** for System default, 12-hour (AM/PM), or 24-hour time. This changes display and input controls without moving any deadlines or lessons. See [new features since v0.3.0](RELEASE_NOTES_v0.3.1.md) for release notes.
+
+## More from eptkod
+
+More games and apps by eptkod, including free browser games, are at **[home.eptkod.com](https://home.eptkod.com/)**.
